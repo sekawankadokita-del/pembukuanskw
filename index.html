@@ -256,7 +256,7 @@ async function loadEntries(){
       entries = [];
       return;
     }
-    const res = await fetch(APPS_SCRIPT_URL, { method: 'GET' });
+    const res = await fetch(APPS_SCRIPT_URL + '?t=' + Date.now(), { method: 'GET', cache: 'no-store' });
     if(!res.ok) throw new Error('fetch failed');
     const json = await res.json();
     if(json.error) throw new Error(json.error);
