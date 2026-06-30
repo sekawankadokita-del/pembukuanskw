@@ -145,6 +145,10 @@
         <select id="kategori"></select>
       </div>
       <div class="field">
+        <label>Dompet</label>
+        <select id="dompet"></select>
+      </div>
+      <div class="field">
         <label>Tanggal</label>
         <input type="date" id="tanggal">
       </div>
@@ -165,6 +169,7 @@
   <div class="tabs">
     <button id="tabBisnis" class="active">🏪 Laporan Sekawan Kadokita</button>
     <button id="tabPribadi">🏠 Laporan Pribadi</button>
+    <button id="tabDompet">💳 Cashflow Dompet</button>
   </div>
 
   <div class="month-pick">
@@ -189,13 +194,19 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwloSML1uG9Q30R
 const KATEGORI = {
   bisnis: {
     masuk: ["Penjualan"],
-    keluar: ["HPP","Gaji","Makan karyawan","Sewa","Sewa Ruko","Internet","POS","Packaging","Ongkir","Listrik toko"]
+    keluar: ["HPP","Gaji","Makan karyawan","Sewa","Sewa Ruko","Internet","POS","Packaging","Ongkir","Listrik toko","Prive"]
   },
   pribadi: {
     masuk: ["Nafkah suami","Gaji dari bisnis","Penghasilan psikolog","Penghasilan lain"],
-    keluar: ["Groceries","Makan di Luar","Listrik rumah","Internet rumah","ART","Anak","Sekolah","Transport","Kartu kredit","Tabungan","Self Care","Subscribe"]
+    keluar: ["Groceries","Makan di Luar","Listrik rumah","Internet rumah","ART","Anak","Rumah","Sekolah","Transport","Kartu kredit","Tabungan","Self Care","Subscribe","Tambah Modal"]
   }
 };
+
+const DOMPET = ["Niaga","Cash","CC","Livin Mandiri","BCA","Shopee"];
+
+// Kategori ini adalah perpindahan uang antar dompet milik sendiri (transfer),
+// BUKAN untung/rugi sungguhan, jadi dikeluarkan dari perhitungan Laba/Sisa.
+const KATEGORI_TRANSFER = ["Prive", "Tambah Modal"];
 
 let state = { group: 'bisnis', type: 'masuk' };
 let entries = [];
@@ -219,6 +230,16 @@ function populateKategori(){
   });
 }
 
+function populateDompet(){
+  const sel = document.getElementById('dompet');
+  sel.innerHTML = '';
+  DOMPET.forEach(d=>{
+    const o = document.createElement('option');
+    o.value = d; o.textContent = d;
+    sel.appendChild(o);
+  });
+}
+
 document.getElementById('segGroup').addEventListener('click', e=>{
   const btn = e.target.closest('button'); if(!btn) return;
   document.querySelectorAll('#segGroup button').forEach(b=>b.classList.remove('active'));
@@ -238,12 +259,21 @@ document.getElementById('tabBisnis').addEventListener('click', ()=>{
   activeTab='bisnis';
   document.getElementById('tabBisnis').classList.add('active');
   document.getElementById('tabPribadi').classList.remove('active');
+  document.getElementById('tabDompet').classList.remove('active');
   render();
 });
 document.getElementById('tabPribadi').addEventListener('click', ()=>{
   activeTab='pribadi';
   document.getElementById('tabPribadi').classList.add('active');
   document.getElementById('tabBisnis').classList.remove('active');
+  document.getElementById('tabDompet').classList.remove('active');
+  render();
+});
+document.getElementById('tabDompet').addEventListener('click', ()=>{
+  activeTab='dompet';
+  document.getElementById('tabDompet').classList.add('active');
+  document.getElementById('tabBisnis').classList.remove('active');
+  document.getElementById('tabPribadi').classList.remove('active');
   render();
 });
 
@@ -293,6 +323,7 @@ document.getElementById('btnSubmit').addEventListener('click', async ()=>{
   const tanggal = document.getElementById('tanggal').value || todayStr();
   const jumlah = parseFloat(document.getElementById('jumlah').value);
   const kategori = document.getElementById('kategori').value;
+  const dompet = document.getElementById('dompet').value;
   const catatan = document.getElementById('catatan').value.trim();
 
   if(!jumlah || jumlah <= 0){
@@ -305,6 +336,7 @@ document.getElementById('btnSubmit').addEventListener('click', async ()=>{
     group: state.group,
     type: state.type,
     kategori,
+    dompet,
     tanggal,
     jumlah,
     catatan
@@ -316,6 +348,7 @@ document.getElementById('btnSubmit').addEventListener('click', async ()=>{
   activeTab = state.group;
   document.getElementById('tabBisnis').classList.toggle('active', activeTab==='bisnis');
   document.getElementById('tabPribadi').classList.toggle('active', activeTab==='pribadi');
+  document.getElementById('tabDompet').classList.remove('active');
   render();
 });
 
@@ -327,24 +360,84 @@ async function deleteEntry(id){
 
 function render(){
   const bf = document.getElementById('bulanFilter').value; // yyyy-mm or ''
+  const monthLabel = bf ? new Date(bf+'-01').toLocaleDateString('id-ID',{month:'long',year:'numeric'}) : 'Semua waktu';
+  const reportArea = document.getElementById('reportArea');
+  const riwayatArea = document.getElementById('riwayatArea');
+  const riwayatTitle = document.getElementById('riwayatTitle');
+
+  if(activeTab === 'dompet'){
+    const filtered = entries.filter(e=> !bf || monthKey(e.tanggal)===bf);
+    const perDompet = {};
+    DOMPET.forEach(d=> perDompet[d] = { masuk:0, keluar:0 });
+    filtered.forEach(e=>{
+      const d = e.dompet || 'Tanpa Dompet';
+      if(!perDompet[d]) perDompet[d] = { masuk:0, keluar:0 };
+      if(e.type==='masuk') perDompet[d].masuk += Number(e.jumlah);
+      else perDompet[d].keluar += Number(e.jumlah);
+    });
+
+    reportArea.innerHTML = `
+      <div class="card">
+        <h2>💳 Cashflow per Dompet — ${monthLabel}</h2>
+        <div class="breakdown">
+          ${Object.entries(perDompet).map(([d,v])=>{
+            const net = v.masuk - v.keluar;
+            return `
+            <div class="bd-row" style="align-items:flex-start;">
+              <span style="font-weight:700;">${d}</span>
+              <span style="text-align:right;">
+                <span style="color:var(--green);">+${fmt(v.masuk)}</span> &nbsp;
+                <span style="color:var(--red);">-${fmt(v.keluar)}</span> &nbsp;
+                <strong class="${net>=0?'profit-pos':'profit-neg'}">= ${fmt(net)}</strong>
+              </span>
+            </div>`;
+          }).join('')}
+        </div>
+        <p class="hint" style="margin-top:14px;">Cashflow dihitung dari seluruh transaksi (Bisnis Sekawan Kadokita & Pribadi) berdasarkan dompet yang dipakai, termasuk Prive dan Tambah Modal (karena itu tetap perpindahan uang fisik antar dompet).</p>
+      </div>`;
+
+    riwayatTitle.textContent = 'Riwayat Transaksi — Semua Dompet';
+    const sorted = [...filtered].sort((a,b)=> b.tanggal.localeCompare(a.tanggal));
+    if(!sorted.length){
+      riwayatArea.innerHTML = '<div class="empty">Belum ada transaksi pada periode ini.</div>';
+    } else {
+      riwayatArea.innerHTML = `
+        <table>
+          <thead><tr><th>Tanggal</th><th>Dompet</th><th>Kelompok</th><th>Kategori</th><th>Jumlah</th></tr></thead>
+          <tbody>
+            ${sorted.map(e=>`
+              <tr>
+                <td>${new Date(e.tanggal).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}</td>
+                <td>${e.dompet || '-'}</td>
+                <td>${e.group==='bisnis'?'Bisnis':'Pribadi'}</td>
+                <td>${e.kategori} <span class="tag">${e.type==='masuk'?'Masuk':'Keluar'}</span></td>
+                <td class="amt ${e.type==='masuk'?'in':'out'}">${e.type==='masuk'?'+':'-'} ${fmt(e.jumlah)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+    }
+    return;
+  }
+
   const filtered = entries.filter(e=> e.group===activeTab && (!bf || monthKey(e.tanggal)===bf));
 
   const totalMasuk = filtered.filter(e=>e.type==='masuk').reduce((s,e)=>s+Number(e.jumlah),0);
-  const totalKeluar = filtered.filter(e=>e.type==='keluar').reduce((s,e)=>s+Number(e.jumlah),0);
+  // Kategori transfer (Prive / Tambah Modal) dikeluarkan dari Total Pengeluaran & Laba/Sisa
+  const totalKeluar = filtered.filter(e=>e.type==='keluar' && !KATEGORI_TRANSFER.includes(e.kategori)).reduce((s,e)=>s+Number(e.jumlah),0);
+  const totalTransfer = filtered.filter(e=>e.type==='keluar' && KATEGORI_TRANSFER.includes(e.kategori)).reduce((s,e)=>s+Number(e.jumlah),0);
   const selisih = totalMasuk - totalKeluar;
 
   const byKat = {};
-  filtered.filter(e=>e.type==='keluar').forEach(e=>{
+  filtered.filter(e=>e.type==='keluar' && !KATEGORI_TRANSFER.includes(e.kategori)).forEach(e=>{
     byKat[e.kategori] = (byKat[e.kategori]||0) + Number(e.jumlah);
   });
   const byKatMasuk = {};
   filtered.filter(e=>e.type==='masuk').forEach(e=>{
     byKatMasuk[e.kategori] = (byKatMasuk[e.kategori]||0) + Number(e.jumlah);
   });
+  const transferLabel = activeTab==='bisnis' ? 'Prive (diambil untuk pribadi)' : 'Tambah Modal (diberikan ke bisnis)';
 
-  const monthLabel = bf ? new Date(bf+'-01').toLocaleDateString('id-ID',{month:'long',year:'numeric'}) : 'Semua waktu';
-
-  const reportArea = document.getElementById('reportArea');
   if(activeTab==='bisnis'){
     reportArea.innerHTML = `
       <div class="card">
@@ -359,7 +452,9 @@ function render(){
           ${Object.keys(byKat).length ? Object.entries(byKat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`
             <div class="bd-row"><span>${k}</span><span>${fmt(v)}</span></div>
           `).join('') : '<div class="empty">Belum ada pengeluaran.</div>'}
+          ${totalTransfer > 0 ? `<div class="bd-row" style="margin-top:8px; border-top:2px dashed var(--line); padding-top:10px;"><span>${transferLabel}</span><span>${fmt(totalTransfer)}</span></div>` : ''}
         </div>
+        <p class="hint" style="margin-top:10px;">Prive tidak dihitung sebagai pengeluaran bisnis — itu uang yang diambil untuk keperluan pribadi, bukan biaya usaha.</p>
       </div>`;
   } else {
     reportArea.innerHTML = `
@@ -379,26 +474,28 @@ function render(){
           ${Object.keys(byKat).length ? Object.entries(byKat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`
             <div class="bd-row"><span>${k}</span><span>${fmt(v)}</span></div>
           `).join('') : '<div class="empty">Belum ada pengeluaran.</div>'}
+          ${totalTransfer > 0 ? `<div class="bd-row" style="margin-top:8px; border-top:2px dashed var(--line); padding-top:10px;"><span>${transferLabel}</span><span>${fmt(totalTransfer)}</span></div>` : ''}
         </div>
+        <p class="hint" style="margin-top:10px;">Tambah Modal tidak dihitung sebagai pengeluaran pribadi — itu uang yang disuntikkan ke bisnis, bukan belanja sehari-hari.</p>
       </div>`;
   }
 
-  document.getElementById('riwayatTitle').textContent =
+  riwayatTitle.textContent =
     'Riwayat Transaksi — ' + (activeTab==='bisnis' ? 'Sekawan Kadokita' : 'Pribadi');
 
-  const riwayatArea = document.getElementById('riwayatArea');
   const sorted = [...filtered].sort((a,b)=> b.tanggal.localeCompare(a.tanggal));
   if(!sorted.length){
     riwayatArea.innerHTML = '<div class="empty">Belum ada transaksi pada periode ini.</div>';
   } else {
     riwayatArea.innerHTML = `
       <table>
-        <thead><tr><th>Tanggal</th><th>Kategori</th><th>Catatan</th><th>Jumlah</th><th></th></tr></thead>
+        <thead><tr><th>Tanggal</th><th>Kategori</th><th>Dompet</th><th>Catatan</th><th>Jumlah</th><th></th></tr></thead>
         <tbody>
           ${sorted.map(e=>`
             <tr>
               <td>${new Date(e.tanggal).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}</td>
               <td>${e.kategori} <span class="tag">${e.type==='masuk'?'Masuk':'Keluar'}</span></td>
+              <td>${e.dompet || '-'}</td>
               <td>${e.catatan ? e.catatan : '-'}</td>
               <td class="amt ${e.type==='masuk'?'in':'out'}">${e.type==='masuk'?'+':'-'} ${fmt(e.jumlah)}</td>
               <td><button class="del" data-id="${e.id}">Hapus</button></td>
@@ -441,6 +538,7 @@ function exportExcel(){
     Kelompok: e.group === 'bisnis' ? 'Bisnis Sekawan Kadokita' : 'Pribadi',
     Jenis: e.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran',
     Kategori: e.kategori,
+    Dompet: e.dompet || '',
     Jumlah: Number(e.jumlah),
     Catatan: e.catatan || '',
     ID: e.id
@@ -483,6 +581,7 @@ function importExcel(file){
           group: (r.Kelompok||'').toLowerCase().includes('pribadi') ? 'pribadi' : 'bisnis',
           type: (r.Jenis||'').toLowerCase().includes('keluar') ? 'keluar' : 'masuk',
           kategori: r.Kategori || '',
+          dompet: r.Dompet || '',
           tanggal: tgl,
           jumlah: Number(r.Jumlah)||0,
           catatan: r.Catatan || ''
@@ -516,6 +615,7 @@ async function init(){
   const now = new Date();
   document.getElementById('bulanFilter').value = now.toISOString().slice(0,7);
   populateKategori();
+  populateDompet();
   await loadEntries();
   render();
 }
